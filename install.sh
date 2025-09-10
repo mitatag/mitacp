@@ -82,17 +82,24 @@ fi
 rm -f /tmp/phpmyadmin.tar.gz
 
 # 9) Install acme.sh correctly
-if [ ! -f "/root/.acme.sh/acme.sh" ]; then
+ACME_DIR="/root/.acme.sh"
+ACME_SH="$ACME_DIR/acme.sh"
+
+if [ ! -f "$ACME_SH" ]; then
   echo "Installing acme.sh..."
   curl https://get.acme.sh | sh
-  source ~/.bashrc || true
-  source /root/.acme.sh/acme.sh.env || true
+
+  # تجنب خطأ unbound variable أثناء عمل source
+  set +u
+  [ -f ~/.bashrc ] && source ~/.bashrc
+  [ -f "$ACME_DIR/acme.sh.env" ] && source "$ACME_DIR/acme.sh.env"
+  set -u
 fi
 
-ACME_SH="/root/.acme.sh/acme.sh"
 if [ ! -x "$ACME_SH" ]; then
   echo "Warning: acme.sh not found at $ACME_SH. Continuing but SSL helpers may fail."
 fi
+
 
 
 # 10) Create helper directory
