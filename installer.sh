@@ -1,67 +1,75 @@
 #!/bin/bash
-# MITACP Fresh Installer for AlmaLinux 8
+# MITACP Full Installer for AlmaLinux 8
 # OpenLiteSpeed + PHP7.4 + MySQL 5.7 + MITACP + phpMyAdmin + File Manager + Default VH + 404
+# Completely resets old installations
 
 set -euo pipefail
 
-echo "=== Cleaning previous installations ==="
-
-# Stop services if running
-systemctl stop lsws || true
+#-----------------------
+# إزالة أي تثبيت سابق
+#-----------------------
+echo "=== Removing previous installations ==="
 systemctl stop mariadb || true
 systemctl stop mysqld || true
+systemctl stop lsws || true
+dnf remove -y mariadb* mysql* openlitespeed lsphp* phpmyadmin || true
+rm -rf /var/www/mitacp /var/www/phpmyadmin
+rm -rf /usr/local/lsws/*
+rm -rf /var/log/mariadb* /var/log/mysql*
+rm -rf /etc/my.cnf /etc/my.cnf.d/*
 
-# Remove old packages
-dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
-
-# Remove old files
-rm -rf /usr/local/lsws
-rm -rf /var/www/mitacp
-rm -rf /var/www/phpmyadmin
-rm -rf /usr/local/lsws/conf/vhosts/*
-
-# Clean logs
-rm -f /var/log/mariadb*
-rm -f /var/log/mysqld*
-
-echo "=== System cleaned. Starting fresh installation ==="
-
-# Ask user for credentials
-read -p "Enter MITACP Admin username: " ADMIN_USER
-read -s -p "Enter MITACP Admin password: " ADMIN_PASS
+#-----------------------
+# إعداد المتغيرات
+#-----------------------
+read -p "Enter MITACP admin username: " ADMIN_USER
+read -s -p "Enter MITACP admin password: " ADMIN_PASS
 echo
 read -p "Enter MySQL root password: " DB_ROOT_PASS
-
 IP=$(curl -s https://ipinfo.io/ip)
 
-# Update system and install basics
+#-----------------------
+# تحديث النظام وتثبيت الأدوات الأساسية
+#-----------------------
 dnf update -y
 dnf install wget unzip curl epel-release git sudo -y
 
-# Install LiteSpeed repo
+#-----------------------
+# تثبيت مستودع LiteSpeed
+#-----------------------
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
-# Install OpenLiteSpeed + PHP7.4
+#-----------------------
+# تثبيت OpenLiteSpeed + PHP7.4
+#-----------------------
 dnf install openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqli lsphp74-pdo_mysql -y
 systemctl enable lsws
 systemctl start lsws
 
-# Install MySQL 5.7
-wget https://dev.mysql.com/get/mysql57-community-release-el8-3.noarch.rpm
-dnf localinstall mysql57-community-release-el8-3.noarch.rpm -y
+#-----------------------
+# تثبيت MySQL 5.7
+#-----------------------
+wget https://dev.mysql.com/get/mysql80-community-release-el8-3.noarch.rpm
+dnf localinstall -y mysql80-community-release-el8-3.noarch.rpm
 dnf config-manager --disable mysql80-community
 dnf config-manager --enable mysql57-community
-dnf install mysql-community-server -y
+dnf install -y mysql-community-server
 systemctl enable mysqld
 systemctl start mysqld
 
-# Secure MySQL
-mysql --connect-expired-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
+#-----------------------
+# إعداد MySQL root password
+#-----------------------
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
+echo "=== MySQL root password: $DB_ROOT_PASS ==="
 
-# Create MITACP database
+#-----------------------
+# إنشاء قاعدة بيانات MITACP
+#-----------------------
 mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
-# Install phpMyAdmin manually
+#-----------------------
+# تنزيل phpMyAdmin يدوياً
+#-----------------------
 cd /var/www/
 wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip
 unzip phpMyAdmin-latest-all-languages.zip
@@ -71,6 +79,7 @@ mkdir -p /var/www/phpmyadmin/tmp
 chown -R nobody:nobody /var/www/phpmyadmin
 chmod -R 755 /var/www/phpmyadmin
 
+# إعداد config.inc.php لphpMyAdmin
 cat > /var/www/phpmyadmin/config.inc.php <<EOL
 <?php
 \$i = 0;
@@ -85,12 +94,15 @@ cat > /var/www/phpmyadmin/config.inc.php <<EOL
 ?>
 EOL
 
-# Install MITACP panel
+#-----------------------
+# تنزيل لوحة MITACP
+#-----------------------
 cd /var/www/
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/panel.zip
 unzip panel.zip -d mitacp
 rm -f panel.zip
 
+# إعداد config.php للوحة
 cat > /var/www/mitacp/config.php <<EOL
 <?php
 \$db_host = 'localhost';
@@ -105,13 +117,17 @@ EOL
 chown -R nobody:nobody /var/www/mitacp
 chmod -R 755 /var/www/mitacp
 
-# Tiny File Manager
+#-----------------------
+# تثبيت Tiny File Manager داخل اللوحة
+#-----------------------
 mkdir -p /var/www/mitacp/files
 cd /var/www/mitacp/files
 wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfilemanager.php
 echo "<?php \$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS'); ?>" > config.php
 
-# Default VH for IP
+#-----------------------
+# إعداد Default VH للـ IP المباشر
+#-----------------------
 mkdir -p /usr/local/lsws/DEFAULT/html
 echo "<!DOCTYPE html>
 <html>
@@ -121,7 +137,7 @@ echo "<!DOCTYPE html>
 </body>
 </html>" > /usr/local/lsws/DEFAULT/html/index.html
 
-# 404 page
+# صفحة 404 لأي دومين غير معرف
 echo "<!DOCTYPE html>
 <html>
 <head><title>404 Not Found</title></head>
@@ -131,6 +147,7 @@ echo "<!DOCTYPE html>
 </body>
 </html>" > /usr/local/lsws/DEFAULT/html/404.html
 
+# إعداد Default VH
 mkdir -p /usr/local/lsws/conf/vhosts/DEFAULT
 cat > /usr/local/lsws/conf/vhosts/DEFAULT/vhost.conf <<EOL
 docRoot /usr/local/lsws/DEFAULT/html
@@ -143,7 +160,7 @@ accesslog \$SERVER_ROOT/logs/default_access.log
 index { useServer 0 indexFiles index.html 404.html }
 EOL
 
-# VH for MITACP
+# إنشاء VH للوحة MITACP على 8088
 mkdir -p /usr/local/lsws/conf/vhosts/mitacp
 cat > /usr/local/lsws/conf/vhosts/mitacp/vhost.conf <<EOL
 docRoot /var/www/mitacp
@@ -156,7 +173,9 @@ accesslog \$SERVER_ROOT/logs/mitacp_access.log
 index { useServer 0 indexFiles index.php }
 EOL
 
-# Open ports
+#-----------------------
+# فتح كل البورتات الأساسية في firewalld
+#-----------------------
 systemctl enable firewalld
 systemctl start firewalld
 firewall-cmd --permanent --add-port=8088/tcp
@@ -165,15 +184,19 @@ firewall-cmd --permanent --add-port=443/tcp
 firewall-cmd --permanent --add-port=22/tcp
 firewall-cmd --reload
 
-# Restart OpenLiteSpeed
+#-----------------------
+# إعادة تشغيل OpenLiteSpeed
+#-----------------------
 systemctl restart lsws
 
-# Display info
+#-----------------------
+# إظهار معلومات التثبيت
+#-----------------------
 echo "=== Installation Completed ==="
 echo "MITACP Panel: http://$IP:8088"
 echo "File Manager: http://$IP:8088/files/tinyfilemanager.php"
 echo "phpMyAdmin: http://$IP/phpmyadmin"
 echo "MySQL root password: $DB_ROOT_PASS"
 echo "Admin MITACP: $ADMIN_USER / Password: $ADMIN_PASS"
-echo "Direct IP shows index: http://$IP"
-echo "Any undefined domain shows 404 page"
+echo "Direct IP shows LiteSpeed index: http://$IP"
+echo "Any unknown domain shows 404 page"
