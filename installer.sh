@@ -1,7 +1,6 @@
 #!/bin/bash
-# MITACP Full Professional Installer for AlmaLinux 8
-# OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP + File Manager + Default VH + 404 + Random Admin Password
-
+# MITACP Full Installer for AlmaLinux 8
+# OpenLiteSpeed + PHP7.4 + MySQL + phpMyAdmin + MITACP + File Manager + Default VH + 404 + Random Admin Password
 set -euo pipefail
 
 #-----------------------
@@ -10,20 +9,13 @@ set -euo pipefail
 ADMIN_USER="admin"
 ADMIN_PASS=$(openssl rand -base64 12)
 IP=$(curl -s https://ipinfo.io/ip)
-DB_ROOT_PASS=$(openssl rand -base64 16)
+MYSQL_ROOT_PASS=$(openssl rand -base64 16)
 
 #-----------------------
-# تحديث النظام وتثبيت الأدوات الأساسية
+# تحديث النظام والأدوات الأساسية
 #-----------------------
 dnf update -y
 dnf install wget unzip curl epel-release git sudo -y
-
-#-----------------------
-# إزالة أي تثبيت قديم
-#-----------------------
-systemctl stop lsws || true
-dnf remove -y openlitespeed lsphp* mariadb-server mariadb || true
-rm -rf /usr/local/lsws /var/www/mitacp /var/www/phpmyadmin
 
 #-----------------------
 # تثبيت مستودع LiteSpeed
@@ -33,24 +25,40 @@ rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rp
 #-----------------------
 # تثبيت OpenLiteSpeed + PHP7.4
 #-----------------------
-dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqli lsphp74-pdo_mysql
+dnf install openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqli lsphp74-pdo_mysql -y
 systemctl enable lsws
 systemctl start lsws
 
 #-----------------------
-# تثبيت MariaDB بشكل آمن مع إعادة ضبط root password
+# إزالة أي تثبيت MySQL سابق
 #-----------------------
-dnf install -y mariadb-server
-systemctl enable mariadb
-systemctl start mariadb
+dnf remove -y mysql mysql-server || true
+rm -rf /var/lib/mysql /etc/my.cnf /etc/mysql || true
 
-# إعادة ضبط كلمة مرور root بطريقة unix_socket آمنة
-mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('$DB_ROOT_PASS'); FLUSH PRIVILEGES;"
+#-----------------------
+# تثبيت MySQL الرسمي
+#-----------------------
+dnf install -y @mysql
+systemctl enable mysqld
+systemctl start mysqld
+
+# الحصول على كلمة المرور المؤقتة من log
+TEMP_PASS=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}')
+
+# ضبط root password عشوائي تلقائي
+mysql --connect-expired-password -uroot -p"$TEMP_PASS" <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASS';
+DELETE FROM mysql.user WHERE User='';
+DROP DATABASE IF EXISTS test;
+FLUSH PRIVILEGES;
+EOF
+
+echo "=== MySQL root password: $MYSQL_ROOT_PASS ==="
 
 #-----------------------
 # إنشاء قاعدة بيانات MITACP
 #-----------------------
-mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
+mysql -uroot -p"$MYSQL_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
 #-----------------------
 # تنزيل phpMyAdmin يدوياً
@@ -64,7 +72,6 @@ mkdir -p /var/www/phpmyadmin/tmp
 chown -R nobody:nobody /var/www/phpmyadmin
 chmod -R 755 /var/www/phpmyadmin
 
-# إعداد config.inc.php لphpMyAdmin
 cat > /var/www/phpmyadmin/config.inc.php <<EOL
 <?php
 \$i = 0;
@@ -73,7 +80,7 @@ cat > /var/www/phpmyadmin/config.inc.php <<EOL
 \$cfg['Servers'][\$i]['auth_type'] = 'cookie';
 \$cfg['Servers'][\$i]['host'] = 'localhost';
 \$cfg['Servers'][\$i]['user'] = 'root';
-\$cfg['Servers'][\$i]['password'] = '$DB_ROOT_PASS';
+\$cfg['Servers'][\$i]['password'] = '$MYSQL_ROOT_PASS';
 \$cfg['Servers'][\$i]['compress'] = false;
 \$cfg['Servers'][\$i]['AllowNoPassword'] = false;
 ?>
@@ -87,12 +94,11 @@ wget https://raw.githubusercontent.com/mitatag/mitacp/main/panel.zip
 unzip panel.zip -d mitacp
 rm -f panel.zip
 
-# إعداد config.php للوحة
 cat > /var/www/mitacp/config.php <<EOL
 <?php
 \$db_host = 'localhost';
 \$db_user = 'root';
-\$db_pass = '$DB_ROOT_PASS';
+\$db_pass = '$MYSQL_ROOT_PASS';
 \$db_name = 'mitacp';
 \$ADMIN_USER = '$ADMIN_USER';
 \$ADMIN_PASS = password_hash('$ADMIN_PASS', PASSWORD_DEFAULT);
@@ -132,7 +138,6 @@ echo "<!DOCTYPE html>
 </body>
 </html>" > /usr/local/lsws/DEFAULT/html/404.html
 
-# إعداد Default VH
 mkdir -p /usr/local/lsws/conf/vhosts/DEFAULT
 cat > /usr/local/lsws/conf/vhosts/DEFAULT/vhost.conf <<EOL
 docRoot /usr/local/lsws/DEFAULT/html
@@ -145,7 +150,9 @@ accesslog \$SERVER_ROOT/logs/default_access.log
 index { useServer 0 indexFiles index.html 404.html }
 EOL
 
+#-----------------------
 # إنشاء VH للوحة MITACP على 8088
+#-----------------------
 mkdir -p /usr/local/lsws/conf/vhosts/mitacp
 cat > /usr/local/lsws/conf/vhosts/mitacp/vhost.conf <<EOL
 docRoot /var/www/mitacp
@@ -181,7 +188,7 @@ echo "=== التثبيت اكتمل ==="
 echo "MITACP Panel: http://$IP:8088"
 echo "مدير الملفات: http://$IP:8088/files/tinyfilemanager.php"
 echo "phpMyAdmin: http://$IP/phpmyadmin"
-echo "MariaDB root password: $DB_ROOT_PASS"
+echo "MySQL root password: $MYSQL_ROOT_PASS"
 echo "Admin MITACP: $ADMIN_USER / Password: $ADMIN_PASS"
 echo "IP مباشر يظهر صفحة Index: http://$IP"
 echo "أي دومين غير معرف يظهر صفحة 404"
