@@ -1,60 +1,45 @@
-#!/bin/bash
-# MITACP Ultimate Installer AlmaLinux 8 - محدث
-# يدعم PHP7.4 + OpenLiteSpeed + MariaDB + phpMyAdmin + MITACP Panel
-
-set -euo pipefail
-
-SERVER_IP=$(curl -s https://ipinfo.io/ip)
-ADMIN_USER="admin"
-ADMIN_PASS="admin123456"
-
-echo "=== تحديث النظام ==="
+# تحديث النظام
 dnf update -y
 
-echo "=== تثبيت المستلزمات الأساسية ==="
+# تثبيت المستلزمات الأساسية
 dnf install wget unzip curl epel-release git sudo -y
 
-echo "=== تثبيت OpenLiteSpeed ==="
-rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm
+# تثبيت مستودع LiteSpeed
+rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
+
+# تثبيت OpenLiteSpeed
 dnf install openlitespeed -y
 
-echo "=== تثبيت PHP 7.4 لـ LiteSpeed ==="
+# تثبيت PHP 7.4 مع الحزم الصحيحة
 dnf install lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqli lsphp74-pdo_mysql -y
 
-echo "=== تمكين وتشغيل OpenLiteSpeed ==="
+# تمكين وتشغيل OpenLiteSpeed
 systemctl enable lsws
 systemctl start lsws
 
-echo "=== تثبيت MariaDB ==="
+# تثبيت MariaDB
 dnf install mariadb-server -y
 systemctl enable mariadb
 systemctl start mariadb
 
-echo "=== إعداد MariaDB ==="
-mysql_secure_installation <<EOF
+# إعداد MariaDB الأساسي (سيطلب كلمة مرور root)
+mysql_secure_installation
 
-y
-$ADMIN_PASS
-$ADMIN_PASS
-y
-y
-y
-y
-EOF
+# إنشاء قاعدة بيانات MITACP
+mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
-echo "=== إنشاء قاعدة بيانات MITACP ==="
-mysql -uroot -p$ADMIN_PASS -e "CREATE DATABASE IF NOT EXISTS mitacp;"
-
-echo "=== تثبيت phpMyAdmin ==="
+# تثبيت phpMyAdmin
 dnf install phpmyadmin -y
 
-echo "=== تنزيل ملفات اللوحة MITACP ==="
+# تنزيل ملفات لوحة MITACP
 cd /var/www/
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/panel.zip
 unzip panel.zip -d mitacp
 rm -f panel.zip
 
-echo "=== إعداد config.php ==="
+# إعداد config.php للوحة
+ADMIN_USER="admin"
+ADMIN_PASS="admin123456"
 cat > /var/www/mitacp/config.php <<EOL
 <?php
 \$db_host = 'localhost';
@@ -66,18 +51,36 @@ cat > /var/www/mitacp/config.php <<EOL
 ?>
 EOL
 
-echo "=== أذونات الملفات ==="
+# أذونات الملفات
 chown -R nobody:nobody /var/www/mitacp
 chmod -R 755 /var/www/mitacp
 
-echo "=== تثبيت acme.sh لإصدار SSL ==="
+# تثبيت Tiny File Manager داخل اللوحة
+cd /var/www/mitacp
+mkdir -p files
+cd files
+wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfilemanager.php
+echo "<?php
+\$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS');
+?>" > config.php
+
+# تثبيت acme.sh لإصدار SSL مجاني
 curl https://get.acme.sh | sh
 
-echo "=== إعداد Virtual Host افتراضي لـ MITACP ==="
+# فتح البورتات الأساسية في firewalld
+systemctl enable firewalld
+systemctl start firewalld
+firewall-cmd --permanent --add-port=8088/tcp
+firewall-cmd --permanent --add-port=80/tcp
+firewall-cmd --permanent --add-port=443/tcp
+firewall-cmd --permanent --add-port=22/tcp
+firewall-cmd --reload
+
+# إعداد Virtual Host افتراضي لـ MITACP
 mkdir -p /usr/local/lsws/conf/vhosts/mitacp
 cat > /usr/local/lsws/conf/vhosts/mitacp/vhost.conf <<EOL
 docRoot                   /var/www/mitacp
-vhDomain                   $SERVER_IP
+vhDomain                   $(curl -s https://ipinfo.io/ip)
 vhAliases                  *
 adminEmails                admin@example.com
 enableGzip                 1
@@ -89,10 +92,11 @@ index  {
 }
 EOL
 
-echo "=== إعادة تشغيل OpenLiteSpeed ==="
+# إعادة تشغيل OpenLiteSpeed
 systemctl restart lsws
 
 echo "=== التثبيت اكتمل ==="
 echo "لوحة MITACP جاهزة:"
-echo "رابط الدخول: http://$SERVER_IP:8088"
+echo "رابط الدخول: http://$(curl -s https://ipinfo.io/ip):8088"
 echo "Admin: $ADMIN_USER / Password: $ADMIN_PASS"
+echo "مدير الملفات متاح هنا: http://$(curl -s https://ipinfo.io/ip):8088/files/tinyfilemanager.php"
