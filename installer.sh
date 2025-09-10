@@ -1,5 +1,5 @@
 #!/bin/bash
-# MITACP Full Installer for AlmaLinux 8
+# MITACP Professional Installer for AlmaLinux 8
 # OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP + File Manager + Default VH + 404 + Random Admin Password
 set -euo pipefail
 
@@ -30,14 +30,20 @@ systemctl enable lsws
 systemctl start lsws
 
 # -----------------------
-# تثبيت MariaDB تلقائيًا بدون تدخل
+# تثبيت MariaDB وإعداد root password بشكل آمن
 # -----------------------
 dnf install mariadb-server -y
 systemctl enable mariadb
 systemctl start mariadb
+
+# تعطيل unix_socket مؤقتًا لتجنب Access Denied
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password;"
 mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
+
+# إزالة أي مستخدمين anonymous واختبار قاعدة البيانات
 mysql -uroot -p"$DB_ROOT_PASS" -e "DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
 mysql -uroot -p"$DB_ROOT_PASS" -e "DROP DATABASE IF EXISTS test;"
+
 echo "=== MariaDB root password: $DB_ROOT_PASS ==="
 
 # -----------------------
@@ -46,7 +52,7 @@ echo "=== MariaDB root password: $DB_ROOT_PASS ==="
 mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
 # -----------------------
-# تنزيل phpMyAdmin مباشرة
+# تنزيل phpMyAdmin
 # -----------------------
 cd /var/www/
 wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip
@@ -104,7 +110,7 @@ wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfi
 echo "<?php \$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS'); ?>" > config.php
 
 # -----------------------
-# إعداد Default VH للـ IP المباشر
+# إعداد Default VH للـ IP المباشر + 404 لأي دومين غير معرف
 # -----------------------
 mkdir -p /usr/local/lsws/DEFAULT/html
 echo "<!DOCTYPE html>
@@ -115,7 +121,6 @@ echo "<!DOCTYPE html>
 </body>
 </html>" > /usr/local/lsws/DEFAULT/html/index.html
 
-# صفحة 404 لأي دومين غير معرف
 echo "<!DOCTYPE html>
 <html>
 <head><title>404 Not Found</title></head>
@@ -125,7 +130,6 @@ echo "<!DOCTYPE html>
 </body>
 </html>" > /usr/local/lsws/DEFAULT/html/404.html
 
-# إعداد Default VH
 mkdir -p /usr/local/lsws/conf/vhosts/DEFAULT
 cat > /usr/local/lsws/conf/vhosts/DEFAULT/vhost.conf <<EOL
 docRoot /usr/local/lsws/DEFAULT/html
