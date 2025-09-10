@@ -81,13 +81,19 @@ if [ -d "$PMA_DIR" ]; then
 fi
 rm -f /tmp/phpmyadmin.tar.gz
 
-# 9) Install acme.sh correctly (no weird unknown parameter)
-# Use explicit flags; the official installer supports: --install --nocron
-curl -sSf https://get.acme.sh | sh -s -- --install --nocron || true
+# 9) Install acme.sh correctly
+if [ ! -f "/root/.acme.sh/acme.sh" ]; then
+  echo "Installing acme.sh..."
+  curl https://get.acme.sh | sh
+  source ~/.bashrc || true
+  source /root/.acme.sh/acme.sh.env || true
+fi
+
 ACME_SH="/root/.acme.sh/acme.sh"
 if [ ! -x "$ACME_SH" ]; then
   echo "Warning: acme.sh not found at $ACME_SH. Continuing but SSL helpers may fail."
 fi
+
 
 # 10) Create helper directory
 mkdir -p "$HELPER_DIR"
