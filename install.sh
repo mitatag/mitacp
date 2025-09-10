@@ -1,60 +1,44 @@
 #!/bin/bash
-# MITACP Ultimate Installer AlmaLinux 8
-# يثبت كل شيء: OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP Panel
+# MITACP + OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + File Manager + Default VH + 404
 
 set -euo pipefail
 
-SERVER_IP=$(curl -s https://ipinfo.io/ip)
+# إعداد المتغيرات
 ADMIN_USER="admin"
 ADMIN_PASS="admin123456"
+IP=$(curl -s https://ipinfo.io/ip)
 
-echo "=== تحديث النظام ==="
+# تحديث النظام وتثبيت الأدوات الأساسية
 dnf update -y
-
-echo "=== تثبيت المستلزمات الأساسية ==="
 dnf install wget unzip curl epel-release git sudo -y
 
-echo "=== تثبيت OpenLiteSpeed ==="
-rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm
-dnf install openlitespeed -y
+# تثبيت مستودع LiteSpeed
+rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
-echo "=== تثبيت PHP 7.4 لـ LiteSpeed ==="
-dnf install lsphp74 lsphp74-mysql lsphp74-curl lsphp74-xml lsphp74-mbstring -y
-
-echo "=== تمكين وتشغيل OpenLiteSpeed ==="
+# تثبيت OpenLiteSpeed + PHP7.4
+dnf install openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqli lsphp74-pdo_mysql -y
 systemctl enable lsws
 systemctl start lsws
 
-echo "=== تثبيت MariaDB ==="
+# تثبيت MariaDB
 dnf install mariadb-server -y
 systemctl enable mariadb
 systemctl start mariadb
+mysql_secure_installation
 
-echo "=== إعداد MariaDB ==="
-mysql_secure_installation <<EOF
+# إنشاء قاعدة بيانات MITACP
+mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
-y
-$ADMIN_PASS
-$ADMIN_PASS
-y
-y
-y
-y
-EOF
-
-echo "=== إنشاء قاعدة بيانات MITACP ==="
-mysql -uroot -p$ADMIN_PASS -e "CREATE DATABASE IF NOT EXISTS mitacp;"
-
-echo "=== تثبيت phpMyAdmin ==="
+# تثبيت phpMyAdmin
 dnf install phpmyadmin -y
 
-echo "=== تنزيل ملفات اللوحة ==="
+# تنزيل لوحة MITACP
 cd /var/www/
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/panel.zip
 unzip panel.zip -d mitacp
 rm -f panel.zip
 
-echo "=== إعداد config.php ==="
+# إعداد config.php للوحة
 cat > /var/www/mitacp/config.php <<EOL
 <?php
 \$db_host = 'localhost';
@@ -66,33 +50,76 @@ cat > /var/www/mitacp/config.php <<EOL
 ?>
 EOL
 
-echo "=== أذونات الملفات ==="
 chown -R nobody:nobody /var/www/mitacp
 chmod -R 755 /var/www/mitacp
 
-echo "=== تثبيت acme.sh لإصدار SSL ==="
-curl https://get.acme.sh | sh
+# تثبيت Tiny File Manager داخل اللوحة
+mkdir -p /var/www/mitacp/files
+cd /var/www/mitacp/files
+wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfilemanager.php
+echo "<?php \$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS'); ?>" > config.php
 
-echo "=== إعداد Virtual Host افتراضي لـ MITACP ==="
-mkdir -p /usr/local/lsws/conf/vhosts/mitacp
-cat > /usr/local/lsws/conf/vhosts/mitacp/vhost.conf <<EOL
-docRoot                   /var/www/mitacp
-vhDomain                   $SERVER_IP
-vhAliases                  *
-adminEmails                admin@example.com
-enableGzip                 1
-errorlog                   \$SERVER_ROOT/logs/mitacp_error.log
-accesslog                  \$SERVER_ROOT/logs/mitacp_access.log
-index  {
-  useServer               0
-  indexFiles              index.php
-}
+# إعداد Default VH للـ IP المباشر
+mkdir -p /usr/local/lsws/DEFAULT/html
+echo "<!DOCTYPE html>
+<html>
+<head><title>Welcome to LiteSpeed</title></head>
+<body>
+<h1>Welcome to LiteSpeed Web Server!</h1>
+</body>
+</html>" > /usr/local/lsws/DEFAULT/html/index.html
+
+# صفحة 404 لأي دومين غير معرف
+echo "<!DOCTYPE html>
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<h1>404 Not Found</h1>
+<p>The requested URL was not found on this server.</p>
+</body>
+</html>" > /usr/local/lsws/DEFAULT/html/404.html
+
+# إعداد Default VH
+mkdir -p /usr/local/lsws/conf/vhosts/DEFAULT
+cat > /usr/local/lsws/conf/vhosts/DEFAULT/vhost.conf <<EOL
+docRoot /usr/local/lsws/DEFAULT/html
+vhDomain *
+vhAliases *
+adminEmails admin@example.com
+enableGzip 1
+errorlog \$SERVER_ROOT/logs/default_error.log
+accesslog \$SERVER_ROOT/logs/default_access.log
+index { useServer 0 indexFiles index.html 404.html }
 EOL
 
-echo "=== إعادة تشغيل OpenLiteSpeed ==="
+# إنشاء VH للوحة MITACP على 8088
+mkdir -p /usr/local/lsws/conf/vhosts/mitacp
+cat > /usr/local/lsws/conf/vhosts/mitacp/vhost.conf <<EOL
+docRoot /var/www/mitacp
+vhDomain $IP
+vhAliases *
+adminEmails admin@example.com
+enableGzip 1
+errorlog \$SERVER_ROOT/logs/mitacp_error.log
+accesslog \$SERVER_ROOT/logs/mitacp_access.log
+index { useServer 0 indexFiles index.php }
+EOL
+
+# فتح كل البورتات الأساسية في firewalld
+systemctl enable firewalld
+systemctl start firewalld
+firewall-cmd --permanent --add-port=8088/tcp
+firewall-cmd --permanent --add-port=80/tcp
+firewall-cmd --permanent --add-port=443/tcp
+firewall-cmd --permanent --add-port=22/tcp
+firewall-cmd --reload
+
+# إعادة تشغيل OpenLiteSpeed
 systemctl restart lsws
 
 echo "=== التثبيت اكتمل ==="
-echo "لوحة MITACP جاهزة:"
-echo "رابط الدخول: http://$SERVER_IP:8088"
+echo "MITACP Panel: http://$IP:8088"
+echo "مدير الملفات: http://$IP:8088/files/tinyfilemanager.php"
 echo "Admin: $ADMIN_USER / Password: $ADMIN_PASS"
+echo "IP مباشر يظهر صفحة Index: http://$IP"
+echo "أي دومين غير معرف يظهر صفحة 404"
