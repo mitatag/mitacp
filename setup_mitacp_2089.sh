@@ -1,14 +1,25 @@
 #!/bin/bash
 
-# إنشاء مجلد Virtual Host لو مش موجود
-sudo mkdir -p $SERVER_ROOT/conf/vhosts/MITACP_VHOST
-sudo mkdir -p /usr/local/lsws/Example/html/mitacp/logs
+# تأكد أنك تعمل بصلاحيات root
+if [[ $EUID -ne 0 ]]; then
+   echo "رجاءً شغّل السكريبت كـ root"
+   exit 1
+fi
+
+# مسارات
+SERVER_ROOT=/usr/local/lsws
+VH_NAME=MITACP_VHOST
+VH_ROOT=/usr/local/lsws/Example/html/mitacp
+
+# إنشاء المجلدات اللازمة
+mkdir -p $SERVER_ROOT/conf/vhosts/$VH_NAME
+mkdir -p $VH_ROOT/logs
 
 # إنشاء ملف vhconf.conf
-sudo tee $SERVER_ROOT/conf/vhosts/MITACP_VHOST/vhconf.conf > /dev/null <<EOL
-virtualhost MITACP_VHOST {
-    vhRoot                  /usr/local/lsws/Example/html/mitacp
-    configFile              conf/vhosts/MITACP_VHOST/vhconf.conf
+tee $SERVER_ROOT/conf/vhosts/$VH_NAME/vhconf.conf > /dev/null <<EOL
+virtualhost $VH_NAME {
+    vhRoot                  $VH_ROOT
+    configFile              conf/vhosts/$VH_NAME/vhconf.conf
     allowSymbolLink         1
     enableScript            1
     restrained              1
@@ -23,10 +34,25 @@ virtualhost MITACP_VHOST {
 }
 EOL
 
-# تحميل الملفات من GitHub
-wget -P /usr/local/lsws/Example/html/mitacp https://raw.githubusercontent.com/mitatag/mitacp/main/setup_mitacp_2089.sh
+# إضافة Listener للـ MITACP على بورت 2089
+tee -a $SERVER_ROOT/conf/httpd_config.xml > /dev/null <<EOL
 
-# أعطِ صلاحيات تنفيذ للسكريبت
-chmod +x /usr/local/lsws/Example/html/mitacp/setup_mitacp_2089.sh
+listener mitacp_https {
+    address                 *:2089
+    reusePort               1
+    secure                  1
+    keyFile                 \$SERVER_ROOT/admin/conf/webadmin.key
+    certFile                \$SERVER_ROOT/admin/conf/webadmin.crt
+    map                     $VH_NAME *
+}
+EOL
 
-echo "تم إنشاء vhconf.conf وتحميل السكريبت."
+# تحميل سكريبت إعداد MITACP
+wget -P $VH_ROOT https://raw.githubusercontent.com/mitatag/mitacp/main/setup_mitacp_2089.sh
+chmod +x $VH_ROOT/setup_mitacp_2089.sh
+
+# إعادة تشغيل LiteSpeed
+$SERVER_ROOT/bin/lswsctrl restart
+
+echo "✅ تم إعداد Virtual Host و Listener على بورت 2089 بنجاح."
+echo "الآن يمكنك الوصول إلى: https://IP:2089/"
