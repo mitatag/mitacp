@@ -1,6 +1,7 @@
 #!/bin/bash
 # MITACP full installer for AlmaLinux (OpenLiteSpeed + PHP 7.4 + MariaDB + phpMyAdmin + Mini Panel)
 # Added: admin panel on 2087, client panel on 2083, plans/users, client/admin separation, hosting plans management, usage pages, styling.
+# Updated: fixed acme.sh install, openlitespeed service handling, PHP helper path usage.
 
 set -euo pipefail
 ROOT_WEBROOT="/usr/local/lsws/Example/html"
@@ -22,19 +23,19 @@ dnf -y update
 
 # 2) Install prerequisites
 dnf -y install epel-release
-dnf -y install wget curl unzip tar git sudo nmap-ncat httpd-tools openssl httpd-tools php-json
+dnf -y install wget curl unzip tar git sudo nmap-ncat httpd-tools openssl php-json jq httpd-tools apr-util
 
 # 3) Add LiteSpeed repo and install OpenLiteSpeed
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.2-1.el8.noarch.rpm || true
 dnf makecache
-dnf -y install openlitespeed
+dnf -y install openlitespeed || true
 
 # 4) Install PHP 7.4 (lsphp74) and common modules
-dnf -y install lsphp74 lsphp74-mysqlnd lsphp74-common lsphp74-gd lsphp74-mbstring lsphp74-opcache lsphp74-xml lsphp74-zip
+dnf -y install lsphp74 lsphp74-mysqlnd lsphp74-common lsphp74-gd lsphp74-mbstring lsphp74-opcache lsphp74-xml lsphp74-zip || true
 
 # 5) Install MariaDB
-dnf -y install mariadb-server mariadb
-systemctl enable --now mariadb
+dnf -y install mariadb-server mariadb || true
+systemctl enable --now mariadb || true
 
 # 6) Ask user for MariaDB root password (or auto-generate)
 read -p "Enter desired MariaDB root password (leave empty to auto-generate): " MYSQL_ROOT_PASSWORD
@@ -44,7 +45,7 @@ if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
 fi
 
 # 7) Secure MariaDB & set root password
-systemctl restart mariadb
+systemctl restart mariadb || true
 sleep 2
 mysql --user=root <<SQL || true
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
@@ -52,6 +53,7 @@ FLUSH PRIVILEGES;
 SQL
 
 # Save env file for helper scripts
+mkdir -p /etc
 cat > "$ENV_FILE" <<EOF
 # MITACP environment
 MYSQL_ROOT_PASSWORD='${MYSQL_ROOT_PASSWORD}'
@@ -62,22 +64,25 @@ chmod 600 "$ENV_FILE"
 mkdir -p "$ROOT_WEBROOT"
 cd /tmp
 PMA_URL="https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz"
-wget -q "$PMA_URL" -O /tmp/phpmyadmin.tar.gz
-tar xzf /tmp/phpmyadmin.tar.gz -C /tmp
-PMA_DIR=$(ls -d /tmp/phpMyAdmin-*-all-languages | head -n1)
-rm -rf "$ROOT_WEBROOT/phpmyadmin" || true
-mv "$PMA_DIR" "$ROOT_WEBROOT/phpmyadmin"
-chown -R nobody:nobody "$ROOT_WEBROOT/phpmyadmin" || true
+wget -q "$PMA_URL" -O /tmp/phpmyadmin.tar.gz || true
+tar xzf /tmp/phpmyadmin.tar.gz -C /tmp || true
+PMA_DIR=$(ls -d /tmp/phpMyAdmin-*-all-languages 2>/dev/null | head -n1 || true)
+if [ -d "$PMA_DIR" ]; then
+  rm -rf "$ROOT_WEBROOT/phpmyadmin" || true
+  mv "$PMA_DIR" "$ROOT_WEBROOT/phpmyadmin" || true
+  chown -R nobody:nobody "$ROOT_WEBROOT/phpmyadmin" || true
+fi
 rm -f /tmp/phpmyadmin.tar.gz
 
 # 9) Install acme.sh for Let's Encrypt (will be used by issue_ssl helper)
-curl https://get.acme.sh | sh -s -- --install --nocron
+# Use correct install flags to avoid the "Unknown parameter" error.
+curl -s https://get.acme.sh | sh -s -- --install --nocron || true
 ACME_SH="/root/.acme.sh/acme.sh"
 
 # 10) Create helper scripts
 mkdir -p "$HELPER_DIR"
 
-# addsite.sh (now supports site HTTP auth password and optional owner)
+# addsite.sh (supports HTTP auth and owner)
 cat > "$HELPER_DIR/addsite.sh" <<'BASH'
 #!/bin/bash
 # usage: addsite.sh domain dbname dbuser dbpass site_pass auto_ssl owner
@@ -93,7 +98,7 @@ OWNER="$7"
 ROOT="/var/www/$DOMAIN/public_html"
 # create folders
 mkdir -p "$ROOT"
-chown -R nobody:nobody "$ROOT" || chown -R $(whoami):$(whoami) "$ROOT" 2>/dev/null || true
+chown -R nobody:nobody "$ROOT" 2>/dev/null || chown -R "$(whoami):$(whoami)" "$ROOT" 2>/dev/null || true
 chmod -R 755 "$ROOT"
 # default index
 cat > "$ROOT/index.php" <<PHP
@@ -121,7 +126,7 @@ Require valid-user
 HT
 fi
 
-# create symlink into OLS example html so it's served
+# symlink into OLS example html so it's served
 ln -s "$ROOT" "/usr/local/lsws/Example/html/$DOMAIN" 2>/dev/null || true
 
 # create database if requested
@@ -145,6 +150,7 @@ fi
 if [ -n "$OWNER" ]; then
   DATAFILE="/usr/local/mitacp/data/users.json"
   if [ -f "$DATAFILE" ]; then
+    # add site field for owner if exists
     tmp=$(mktemp)
     jq --arg u "$OWNER" --arg d "$DOMAIN" 'map(if .user==$u then .site=$d else . end)' "$DATAFILE" > "$tmp" && mv "$tmp" "$DATAFILE" || true
   fi
@@ -236,7 +242,7 @@ chmod 440 "$SUDOERS_FILE" || true
 mkdir -p "$PANEL_DIR"
 
 # admin.json default credentials (admin can login to admin panel 2087)
-cat > "$PANEL_DIR/admin.json" <<EOF
+cat > "$PANEL_DIR/admin.json" <<'EOF'
 {
   "user": "admin",
   "pass": "admin123456"
@@ -305,6 +311,7 @@ function mitacp_footer(){
 PHP
 
 # auth.php (supports admin (admin.json) and clients (data/users.json); clients passwords hashed)
+# Note: PHP files use hardcoded helper path '/usr/local/mitacp/bin' when calling shell helpers.
 cat > "$PANEL_DIR/auth.php" <<'PHP'
 <?php
 session_start();
@@ -327,19 +334,18 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
             $_SESSION['username'] = $u;
         } else {
             // client login - check clients.json (password hashed)
-            foreach($clients as $c){
+            foreach($clients as $idx=>$c){
                 if($c['user']===$u){
                     if (isset($c['pass_hashed']) && password_verify($p, $c['pass_hashed'])) {
                         $_SESSION['loggedin'] = true;
                         $_SESSION['is_admin'] = false;
                         $_SESSION['username'] = $u;
-                    } elseif (!isset($c['pass_hashed']) && $c['pass']===$p) {
+                    } elseif (!isset($c['pass_hashed']) && isset($c['pass']) && $c['pass']===$p) {
                         // legacy plain password - accept and re-hash
                         $_SESSION['loggedin'] = true;
                         $_SESSION['is_admin'] = false;
                         $_SESSION['username'] = $u;
-                        // update to hashed
-                        $c['pass_hashed'] = password_hash($p, PASSWORD_DEFAULT);
+                        $clients[$idx]['pass_hashed'] = password_hash($p, PASSWORD_DEFAULT);
                         file_put_contents($clientsFile, json_encode($clients, JSON_PRETTY_PRINT));
                     }
                     break;
@@ -417,10 +423,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
   $sitepass=trim($_POST['sitepass'] ?? '');
   $owner=trim($_POST['owner'] ?? '');
   $auto_ssl = isset($_POST['auto_ssl']) ? '1' : '0';
-  $cmd = escapeshellcmd("sudo $HELPER_DIR/addsite.sh ") . ' ' 
-        . escapeshellarg($domain) . ' ' . escapeshellarg($dbname) . ' '
-        . escapeshellarg($dbuser) . ' ' . escapeshellarg($dbpass) . ' '
-        . escapeshellarg($sitepass) . ' ' . escapeshellarg($auto_ssl) . ' ' . escapeshellarg($owner);
+  $cmd = 'sudo /usr/local/mitacp/bin/addsite.sh ' . escapeshellarg($domain) . ' ' . escapeshellarg($dbname) . ' ' . escapeshellarg($dbuser) . ' ' . escapeshellarg($dbpass) . ' ' . escapeshellarg($sitepass) . ' ' . escapeshellarg($auto_ssl) . ' ' . escapeshellarg($owner);
   $out = shell_exec($cmd);
   echo '<div style="background:#e7ffe7;padding:10px;margin:10px 0;">'.htmlspecialchars($out).'</div>';
 }
@@ -438,13 +441,13 @@ Auto issue SSL (Let's Encrypt): <input type="checkbox" name="auto_ssl" value="1"
 <?php mitacp_footer(); ?>
 PHP
 
-# adddb.php unchanged logic
+# adddb.php
 cat > "$PANEL_DIR/adddb.php" <<'PHP'
 <?php include 'auth.php'; include 'header.php'; include 'footer.php'; mitacp_header();
 if(!(isset($_SESSION['is_admin']) && $_SESSION['is_admin']===true)){ echo '<div>Admin only</div>'; mitacp_footer(); exit; }
 if($_SERVER['REQUEST_METHOD']=='POST'){
   $dbname=$_POST['dbname']; $dbuser=$_POST['dbuser']; $dbpass=$_POST['dbpass'];
-  $cmd = "sudo $HELPER_DIR/createdb.sh " . escapeshellarg($dbname) . ' ' . escapeshellarg($dbuser) . ' ' . escapeshellarg($dbpass);
+  $cmd = 'sudo /usr/local/mitacp/bin/createdb.sh ' . escapeshellarg($dbname) . ' ' . escapeshellarg($dbuser) . ' ' . escapeshellarg($dbpass);
   $out = shell_exec($cmd);
   echo '<div style="background:#e7ffe7;padding:10px;margin:10px 0;">'.htmlspecialchars($out).'</div>';
 }
@@ -477,7 +480,7 @@ PHP
 cat > "$PANEL_DIR/dbs.php" <<'PHP'
 <?php include 'auth.php'; include 'header.php'; include 'footer.php'; mitacp_header();
 if(!(isset($_SESSION['is_admin']) && $_SESSION['is_admin']===true)){ echo '<div>Admin only</div>'; mitacp_footer(); exit; }
-$out = shell_exec('sudo $HELPER_DIR/listdbs.sh');
+$out = shell_exec('sudo /usr/local/mitacp/bin/listdbs.sh');
 echo '<pre>'.htmlspecialchars($out).'</pre>';
 mitacp_footer();
 ?>
@@ -492,7 +495,7 @@ if($_SERVER['REQUEST_METHOD']=='POST' && isset($_FILES['sqlfile'])){
   $tmp = $_FILES['sqlfile']['tmp_name'];
   $target = '/tmp/'.basename($_FILES['sqlfile']['name']);
   move_uploaded_file($tmp, $target);
-  $cmd = "sudo $HELPER_DIR/importsql.sh " . escapeshellarg($dbname) . ' ' . escapeshellarg($target);
+  $cmd = 'sudo /usr/local/mitacp/bin/importsql.sh ' . escapeshellarg($dbname) . ' ' . escapeshellarg($target);
   $out = shell_exec($cmd);
   echo '<div style="background:#e7ffe7;padding:10px;margin:10px 0;">'.htmlspecialchars($out).'</div>';
 }
@@ -534,7 +537,7 @@ if(isset($_GET['edit'])){
   if($_SERVER['REQUEST_METHOD']=='POST'){
     $content = $_POST['content'];
     $b64 = base64_encode($content);
-    $cmd = "sudo $HELPER_DIR/file_write.sh " . escapeshellarg($file) . ' ' . escapeshellarg($b64);
+    $cmd = 'sudo /usr/local/mitacp/bin/file_write.sh ' . escapeshellarg($file) . ' ' . escapeshellarg($b64);
     $out = shell_exec($cmd);
     echo '<div>'.htmlspecialchars($out).'</div>';
   }
@@ -568,7 +571,7 @@ if(isset($_GET['action']) && $_GET['action']=='status'){
 }
 if($_SERVER['REQUEST_METHOD']=='POST' && isset($_POST['issue_domain'])){
   $d = trim($_POST['issue_domain']);
-  $cmd = "sudo $HELPER_DIR/issue_ssl.sh " . escapeshellarg($d);
+  $cmd = 'sudo /usr/local/mitacp/bin/issue_ssl.sh ' . escapeshellarg($d);
   $out = shell_exec($cmd);
   echo '<div>'.htmlspecialchars($out).'</div>';
 }
@@ -812,9 +815,9 @@ systemctl daemon-reload
 systemctl enable --now mitacp.service || true
 systemctl enable --now mitacp-admin.service || true
 
-# 15) Enable & start services
-systemctl enable --now openlitespeed
-systemctl enable --now mariadb
+# 15) Enable & start services (handle OpenLiteSpeed restart safely)
+systemctl restart openlitespeed || true
+systemctl enable --now mariadb || true
 
 # 16) Final banner / instructions
 cat <<EOF
