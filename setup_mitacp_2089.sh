@@ -1,16 +1,20 @@
 #!/bin/bash
 
+# تعريف SERVER_ROOT الصحيح
+SERVER_ROOT="/usr/local/lsws"
+
 # إعدادات المسارات
 VH_NAME="MITACP_VHOST"
-VH_ROOT="/usr/local/lsws/$VH_NAME/html/mitacp"
-CONFIG_FILE="$SERVER_ROOT/conf/vhosts/$VH_NAME/vhconf.conf"
+VH_ROOT="$SERVER_ROOT/$VH_NAME/html/mitacp"
+CONFIG_DIR="$SERVER_ROOT/conf/vhosts/$VH_NAME"
+CONFIG_FILE="$CONFIG_DIR/vhconf.conf"
 LISTENER_NAME="mitacp_https"
 LISTENER_PORT="2089"
 SSL_KEY="$SERVER_ROOT/admin/conf/webadmin.key"
 SSL_CERT="$SERVER_ROOT/admin/conf/webadmin.crt"
 
-# إنشاء مجلد الـ Virtual Host
-mkdir -p "$VH_ROOT"
+# إنشاء مجلدات Virtual Host
+mkdir -p "$VH_ROOT" "$CONFIG_DIR" "$VH_ROOT/logs"
 
 # إنشاء ملف vhconf.conf
 cat > "$CONFIG_FILE" <<EOF
@@ -50,10 +54,12 @@ listener $LISTENER_NAME {
 }
 EOF
 
-# تحديث إعدادات LiteSpeed
-echo "include $CONFIG_FILE" >> "$SERVER_ROOT/conf/httpd_config.xml"
+# إضافة الـ include في httpd_config.xml إذا لم يكن موجود
+if ! grep -q "$CONFIG_FILE" "$SERVER_ROOT/conf/httpd_config.xml"; then
+    sed -i "/<\/config>/i \    include $CONFIG_FILE" "$SERVER_ROOT/conf/httpd_config.xml"
+fi
 
-# إعادة تشغيل LiteSpeed لتطبيق التغييرات
-sudo /usr/local/lsws/bin/lswsctrl restart
+# إعادة تشغيل LiteSpeed
+sudo $SERVER_ROOT/bin/lswsctrl restart
 
 echo "تم إعداد Virtual Host وListener بنجاح على البورت $LISTENER_PORT."
