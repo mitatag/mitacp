@@ -1,55 +1,56 @@
 #!/bin/bash
-# MITACP Full Installer - AlmaLinux 8 / Rocky 8
-# OpenLiteSpeed + PHP7.4 + MySQL 5.7 + MITACP + phpMyAdmin
+# MITACP Installer for AlmaLinux 8 / Rocky Linux 8
+# OpenLiteSpeed + PHP7.4 + MySQL 8.0 + MITACP + phpMyAdmin
 
 set -euo pipefail
 
+#-----------------------
+# Cleanup previous installations
+#-----------------------
 echo "=== Cleaning previous installations ==="
-systemctl stop lsws.service || true
-systemctl stop mariadb.service || true
-systemctl stop mysqld.service || true
+systemctl stop lsws || true
+systemctl stop mysqld || true
 
-dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
+dnf remove -y openlitespeed lsphp74* mysql-community-server phpmyadmin || true
 rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html
 rm -rf /var/log/mariadb /var/log/mysql || true
 
 #-----------------------
-# Variables
+# Ask user for credentials
 #-----------------------
 read -p "Enter MITACP admin username: " ADMIN_USER
-read -s -p "Enter MITACP admin password: " ADMIN_PASS
-echo ""
-read -s -p "Enter MySQL root password: " DB_ROOT_PASS
-echo ""
+read -sp "Enter MITACP admin password: " ADMIN_PASS
+echo
+read -sp "Enter MySQL root password: " DB_ROOT_PASS
+echo
+
 IP=$(curl -s https://ipinfo.io/ip)
 
 #-----------------------
-# Install basic tools
+# Install dependencies
 #-----------------------
 dnf update -y
-dnf install -y wget unzip curl epel-release git sudo
+dnf install wget unzip curl epel-release git sudo -y
 
 #-----------------------
-# Install LiteSpeed
+# Install LiteSpeed + PHP 7.4
 #-----------------------
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
-dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache
-
+dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqli lsphp74-pdo_mysql
 systemctl enable lsws
 systemctl start lsws
 
 #-----------------------
-# Install MySQL 5.7
+# Install MySQL 8.0
 #-----------------------
-wget https://repo.mysql.com/mysql57-community-release-el8-1.noarch.rpm
-dnf localinstall -y mysql57-community-release-el8-1.noarch.rpm
-dnf config-manager --disable mysql80-community
-dnf config-manager --enable mysql57-community
+wget https://dev.mysql.com/get/mysql80-community-release-el8-3.noarch.rpm
+dnf localinstall -y mysql80-community-release-el8-3.noarch.rpm
+dnf config-manager --disable mysql80-community-source
 dnf install -y mysql-community-server
 systemctl enable mysqld
 systemctl start mysqld
 
-# Set MySQL root password
+# Set root password
 mysql --connect-expired-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
 
 #-----------------------
@@ -58,7 +59,7 @@ mysql --connect-expired-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY
 mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
 #-----------------------
-# Install phpMyAdmin
+# Download phpMyAdmin
 #-----------------------
 cd /var/www/
 wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip
@@ -84,7 +85,7 @@ cat > /var/www/phpmyadmin/config.inc.php <<EOL
 EOL
 
 #-----------------------
-# Install MITACP
+# Download MITACP panel
 #-----------------------
 cd /var/www/
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/panel.zip
@@ -106,26 +107,33 @@ chown -R nobody:nobody /var/www/mitacp
 chmod -R 755 /var/www/mitacp
 
 #-----------------------
-# Default VH for IP
+# Tiny File Manager
 #-----------------------
-mkdir -p /usr/local/lsws/DEFAULT/html
-echo "<!DOCTYPE html><html><head><title>Welcome to LiteSpeed</title></head><body><h1>Welcome to LiteSpeed Web Server!</h1></body></html>" > /usr/local/lsws/DEFAULT/html/index.html
-echo "<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>" > /usr/local/lsws/DEFAULT/html/404.html
+mkdir -p /var/www/mitacp/files
+cd /var/www/mitacp/files
+wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfilemanager.php
+echo "<?php \$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS'); ?>" > config.php
 
 #-----------------------
-# VH for MITACP panel
+# Default VH
 #-----------------------
-mkdir -p /usr/local/lsws/conf/vhosts/mitacp
-cat > /usr/local/lsws/conf/vhosts/mitacp/vhost.conf <<EOL
-docRoot /var/www/mitacp
-vhDomain $IP
-vhAliases *
-adminEmails admin@example.com
-enableGzip 1
-errorlog \$SERVER_ROOT/logs/mitacp_error.log
-accesslog \$SERVER_ROOT/logs/mitacp_access.log
-index { useServer 0 indexFiles index.php }
-EOL
+mkdir -p /usr/local/lsws/DEFAULT/html
+echo "<!DOCTYPE html>
+<html>
+<head><title>Welcome to LiteSpeed</title></head>
+<body>
+<h1>Welcome to LiteSpeed Web Server!</h1>
+</body>
+</html>" > /usr/local/lsws/DEFAULT/html/index.html
+
+echo "<!DOCTYPE html>
+<html>
+<head><title>404 Not Found</title></head>
+<body>
+<h1>404 Not Found</h1>
+<p>The requested URL was not found on this server.</p>
+</body>
+</html>" > /usr/local/lsws/DEFAULT/html/404.html
 
 #-----------------------
 # Firewall
@@ -139,15 +147,18 @@ firewall-cmd --permanent --add-port=22/tcp
 firewall-cmd --reload
 
 #-----------------------
-# Restart LSWS
+# Restart OpenLiteSpeed
 #-----------------------
 systemctl restart lsws
 
 #-----------------------
-# Show info
+# Show installation info
 #-----------------------
-echo "=== Installation Completed ==="
+echo "=== Installation Complete ==="
 echo "MITACP Panel: http://$IP:8088"
+echo "File Manager: http://$IP:8088/files/tinyfilemanager.php"
 echo "phpMyAdmin: http://$IP/phpmyadmin"
 echo "MySQL root password: $DB_ROOT_PASS"
 echo "Admin MITACP: $ADMIN_USER / Password: $ADMIN_PASS"
+echo "IP direct index: http://$IP"
+echo "Any unknown domain shows 404 page"
