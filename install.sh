@@ -75,8 +75,8 @@ fi
 rm -f /tmp/phpmyadmin.tar.gz
 
 # 9) Install acme.sh for Let's Encrypt (will be used by issue_ssl helper)
-# Use correct install flags to avoid the "Unknown parameter" error.
-curl -s https://get.acme.sh | sh -s -- --install --nocron || true
+curl https://get.acme.sh | sh
+source ~/.bashrc
 ACME_SH="/root/.acme.sh/acme.sh"
 
 # 10) Create helper scripts
