@@ -448,6 +448,29 @@ PHP
 chown -R nobody:nobody "$PANEL_DIR" 2>/dev/null || true
 chmod -R 755 "$PANEL_DIR"
 
+# 12.1) Setup standalone PHP server for mitacp on port 2083
+PANEL_PORT=2083
+PANEL_HOST="0.0.0.0"
+
+cat > /etc/systemd/system/mitacp.service <<EOF
+[Unit]
+Description=MITACP mini panel on port $PANEL_PORT
+After=network.target
+
+[Service]
+Type=simple
+User=nobody
+WorkingDirectory=$PANEL_DIR
+ExecStart=/usr/local/lsws/lsphp74/bin/lsphp -S $PANEL_HOST:$PANEL_PORT -t $PANEL_DIR
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now mitacp.service
+
 # 13) Enable & start services
 systemctl enable --now openlitespeed
 systemctl enable --now mariadb
@@ -458,6 +481,8 @@ cat <<EOF
 ==> MITACP installation finished successfully.
 
 Access your new panel at: http://YOUR_SERVER_IP/mitacp/
+Access your new panel at: http://YOUR_SERVER_IP:2083/
+
 Default admin credentials: admin / admin123456
 You can change admin credentials inside the panel (Change Admin Credentials).
 
