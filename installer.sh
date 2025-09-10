@@ -1,6 +1,7 @@
 #!/bin/bash
-# MITACP Professional Installer for AlmaLinux 8
+# MITACP Clean & Fresh Installer for AlmaLinux 8
 # OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP + File Manager + Default VH + 404 + Random Admin Password
+
 set -euo pipefail
 
 # -----------------------
@@ -10,6 +11,15 @@ ADMIN_USER="admin"
 ADMIN_PASS=$(openssl rand -base64 12)
 IP=$(curl -s https://ipinfo.io/ip)
 DB_ROOT_PASS=$(openssl rand -base64 16)
+
+# -----------------------
+# حذف أي تثبيت سابق
+# -----------------------
+echo "=== Removing old installations ==="
+systemctl stop lsws || true
+systemctl stop mariadb || true
+dnf remove -y openlitespeed lsphp* mariadb-server mariadb php* || true
+rm -rf /usr/local/lsws /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/conf/vhosts/*
 
 # -----------------------
 # تحديث النظام وتثبيت الأدوات الأساسية
@@ -30,17 +40,15 @@ systemctl enable lsws
 systemctl start lsws
 
 # -----------------------
-# تثبيت MariaDB وإعداد root password بشكل آمن
+# تثبيت MariaDB وإعداد root password آمن
 # -----------------------
 dnf install mariadb-server -y
 systemctl enable mariadb
 systemctl start mariadb
 
-# تعطيل unix_socket مؤقتًا لتجنب Access Denied
+# ضبط root password مباشرة بدون تدخل
 mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password;"
 mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
-
-# إزالة أي مستخدمين anonymous واختبار قاعدة البيانات
 mysql -uroot -p"$DB_ROOT_PASS" -e "DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
 mysql -uroot -p"$DB_ROOT_PASS" -e "DROP DATABASE IF EXISTS test;"
 
@@ -110,7 +118,7 @@ wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfi
 echo "<?php \$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS'); ?>" > config.php
 
 # -----------------------
-# إعداد Default VH للـ IP المباشر + 404 لأي دومين غير معرف
+# إعداد Default VH للـ IP المباشر + صفحة 404 لأي دومين غير معرف
 # -----------------------
 mkdir -p /usr/local/lsws/DEFAULT/html
 echo "<!DOCTYPE html>
