@@ -1,6 +1,7 @@
 #!/bin/bash
 # MITACP Full Professional Installer for AlmaLinux 8
 # OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP + File Manager + Default VH + 404 + Random Admin Password
+
 set -euo pipefail
 
 #-----------------------
@@ -10,10 +11,6 @@ ADMIN_USER="admin"
 ADMIN_PASS=$(openssl rand -base64 12)
 IP=$(curl -s https://ipinfo.io/ip)
 DB_ROOT_PASS=$(openssl rand -base64 16)
-
-echo "=== بدء التثبيت ==="
-echo "IP السيرفر: $IP"
-echo "Admin MITACP سيتم إنشاؤه بكلمة مرور عشوائية..."
 
 #-----------------------
 # تحديث النظام وتثبيت الأدوات الأساسية
@@ -25,12 +22,8 @@ dnf install wget unzip curl epel-release git sudo -y
 # إزالة أي تثبيت قديم
 #-----------------------
 systemctl stop lsws || true
-systemctl stop mariadb || true
-dnf remove -y openlitespeed lsphp* mariadb-server mariadb
-
-rm -rf /usr/local/lsws
-rm -rf /var/www/mitacp
-rm -rf /var/www/phpmyadmin
+dnf remove -y openlitespeed lsphp* mariadb-server mariadb || true
+rm -rf /usr/local/lsws /var/www/mitacp /var/www/phpmyadmin
 
 #-----------------------
 # تثبيت مستودع LiteSpeed
@@ -45,27 +38,14 @@ systemctl enable lsws
 systemctl start lsws
 
 #-----------------------
-# تثبيت MariaDB وإعادة ضبط root password
+# تثبيت MariaDB بشكل آمن مع إعادة ضبط root password
 #-----------------------
 dnf install -y mariadb-server
 systemctl enable mariadb
-systemctl stop mariadb
-
-# تشغيل MariaDB بدون تحقق
-mysqld_safe --skip-grant-tables &
-sleep 5
-
-mysql -u root <<MYSQL_SCRIPT
-FLUSH PRIVILEGES;
-ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';
-FLUSH PRIVILEGES;
-MYSQL_SCRIPT
-
-# إيقاف الخدمة مؤقتة وإعادة تشغيلها
-pkill mysqld
 systemctl start mariadb
 
-echo "=== MariaDB root password: $DB_ROOT_PASS ==="
+# إعادة ضبط كلمة مرور root بطريقة unix_socket آمنة
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('$DB_ROOT_PASS'); FLUSH PRIVILEGES;"
 
 #-----------------------
 # إنشاء قاعدة بيانات MITACP
@@ -123,7 +103,7 @@ chown -R nobody:nobody /var/www/mitacp
 chmod -R 755 /var/www/mitacp
 
 #-----------------------
-# تثبيت Tiny File Manager
+# تثبيت Tiny File Manager داخل اللوحة
 #-----------------------
 mkdir -p /var/www/mitacp/files
 cd /var/www/mitacp/files
@@ -131,7 +111,7 @@ wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfi
 echo "<?php \$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS'); ?>" > config.php
 
 #-----------------------
-# إعداد Default VH و404
+# إعداد Default VH للـ IP المباشر
 #-----------------------
 mkdir -p /usr/local/lsws/DEFAULT/html
 echo "<!DOCTYPE html>
@@ -142,6 +122,7 @@ echo "<!DOCTYPE html>
 </body>
 </html>" > /usr/local/lsws/DEFAULT/html/index.html
 
+# صفحة 404 لأي دومين غير معرف
 echo "<!DOCTYPE html>
 <html>
 <head><title>404 Not Found</title></head>
@@ -151,6 +132,7 @@ echo "<!DOCTYPE html>
 </body>
 </html>" > /usr/local/lsws/DEFAULT/html/404.html
 
+# إعداد Default VH
 mkdir -p /usr/local/lsws/conf/vhosts/DEFAULT
 cat > /usr/local/lsws/conf/vhosts/DEFAULT/vhost.conf <<EOL
 docRoot /usr/local/lsws/DEFAULT/html
@@ -163,7 +145,7 @@ accesslog \$SERVER_ROOT/logs/default_access.log
 index { useServer 0 indexFiles index.html 404.html }
 EOL
 
-# VH للوحة MITACP على 8088
+# إنشاء VH للوحة MITACP على 8088
 mkdir -p /usr/local/lsws/conf/vhosts/mitacp
 cat > /usr/local/lsws/conf/vhosts/mitacp/vhost.conf <<EOL
 docRoot /var/www/mitacp
@@ -177,7 +159,7 @@ index { useServer 0 indexFiles index.php }
 EOL
 
 #-----------------------
-# فتح البورتات في firewalld
+# فتح كل البورتات الأساسية في firewalld
 #-----------------------
 systemctl enable firewalld
 systemctl start firewalld
