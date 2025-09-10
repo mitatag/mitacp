@@ -1,38 +1,80 @@
 #!/bin/bash
-# MITACP + OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + File Manager + Default VH + 404
+# MITACP Full Installer for AlmaLinux 8
+# OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP + File Manager + Default VH + 404 + Random Admin Password
 
 set -euo pipefail
 
+#-----------------------
 # إعداد المتغيرات
+#-----------------------
 ADMIN_USER="admin"
-ADMIN_PASS="admin123456"
+# توليد باسورد عشوائي للـ admin
+ADMIN_PASS=$(openssl rand -base64 12)
 IP=$(curl -s https://ipinfo.io/ip)
+DB_ROOT_PASS=$(openssl rand -base64 16)
 
+#-----------------------
 # تحديث النظام وتثبيت الأدوات الأساسية
+#-----------------------
 dnf update -y
 dnf install wget unzip curl epel-release git sudo -y
 
+#-----------------------
 # تثبيت مستودع LiteSpeed
+#-----------------------
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
+#-----------------------
 # تثبيت OpenLiteSpeed + PHP7.4
+#-----------------------
 dnf install openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqli lsphp74-pdo_mysql -y
 systemctl enable lsws
 systemctl start lsws
 
-# تثبيت MariaDB
+#-----------------------
+# تثبيت MariaDB وتعيين root password تلقائياً
+#-----------------------
 dnf install mariadb-server -y
 systemctl enable mariadb
 systemctl start mariadb
-mysql_secure_installation
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
+echo "=== MariaDB root password: $DB_ROOT_PASS ==="
 
+#-----------------------
 # إنشاء قاعدة بيانات MITACP
-mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS mitacp;"
+#-----------------------
+mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
-# تثبيت phpMyAdmin
-dnf install phpmyadmin -y
+#-----------------------
+# تنزيل phpMyAdmin يدوياً
+#-----------------------
+cd /var/www/
+wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip
+unzip phpMyAdmin-latest-all-languages.zip
+mv phpMyAdmin-*-all-languages phpmyadmin
+rm -f phpMyAdmin-latest-all-languages.zip
+mkdir -p /var/www/phpmyadmin/tmp
+chown -R nobody:nobody /var/www/phpmyadmin
+chmod -R 755 /var/www/phpmyadmin
 
+# إعداد config.inc.php لphpMyAdmin
+cat > /var/www/phpmyadmin/config.inc.php <<EOL
+<?php
+\$i = 0;
+\$i++;
+\$cfg['blowfish_secret'] = 'ChangeThisSecret123!@#';
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+\$cfg['Servers'][\$i]['host'] = 'localhost';
+\$cfg['Servers'][\$i]['user'] = 'root';
+\$cfg['Servers'][\$i]['password'] = '$DB_ROOT_PASS';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+?>
+EOL
+
+#-----------------------
 # تنزيل لوحة MITACP
+#-----------------------
 cd /var/www/
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/panel.zip
 unzip panel.zip -d mitacp
@@ -43,7 +85,7 @@ cat > /var/www/mitacp/config.php <<EOL
 <?php
 \$db_host = 'localhost';
 \$db_user = 'root';
-\$db_pass = '$ADMIN_PASS';
+\$db_pass = '$DB_ROOT_PASS';
 \$db_name = 'mitacp';
 \$ADMIN_USER = '$ADMIN_USER';
 \$ADMIN_PASS = password_hash('$ADMIN_PASS', PASSWORD_DEFAULT);
@@ -53,13 +95,17 @@ EOL
 chown -R nobody:nobody /var/www/mitacp
 chmod -R 755 /var/www/mitacp
 
+#-----------------------
 # تثبيت Tiny File Manager داخل اللوحة
+#-----------------------
 mkdir -p /var/www/mitacp/files
 cd /var/www/mitacp/files
 wget https://raw.githubusercontent.com/prasathmani/tinyfilemanager/master/tinyfilemanager.php
 echo "<?php \$auth_users = array('$ADMIN_USER' => '$ADMIN_PASS'); ?>" > config.php
 
+#-----------------------
 # إعداد Default VH للـ IP المباشر
+#-----------------------
 mkdir -p /usr/local/lsws/DEFAULT/html
 echo "<!DOCTYPE html>
 <html>
@@ -105,7 +151,9 @@ accesslog \$SERVER_ROOT/logs/mitacp_access.log
 index { useServer 0 indexFiles index.php }
 EOL
 
+#-----------------------
 # فتح كل البورتات الأساسية في firewalld
+#-----------------------
 systemctl enable firewalld
 systemctl start firewalld
 firewall-cmd --permanent --add-port=8088/tcp
@@ -114,12 +162,19 @@ firewall-cmd --permanent --add-port=443/tcp
 firewall-cmd --permanent --add-port=22/tcp
 firewall-cmd --reload
 
+#-----------------------
 # إعادة تشغيل OpenLiteSpeed
+#-----------------------
 systemctl restart lsws
 
+#-----------------------
+# إظهار معلومات التثبيت
+#-----------------------
 echo "=== التثبيت اكتمل ==="
 echo "MITACP Panel: http://$IP:8088"
 echo "مدير الملفات: http://$IP:8088/files/tinyfilemanager.php"
-echo "Admin: $ADMIN_USER / Password: $ADMIN_PASS"
+echo "phpMyAdmin: http://$IP/phpmyadmin"
+echo "MariaDB root password: $DB_ROOT_PASS"
+echo "Admin MITACP: $ADMIN_USER / Password: $ADMIN_PASS"
 echo "IP مباشر يظهر صفحة Index: http://$IP"
 echo "أي دومين غير معرف يظهر صفحة 404"
