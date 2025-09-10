@@ -7,20 +7,6 @@ set -euo pipefail
 
 echo "=== Cleaning previous installations ==="
 
-# إيقاف الخدمات إذا موجودة
-systemctl stop lsws.service 2>/dev/null || true
-systemctl stop mariadb.service 2>/dev/null || true
-systemctl stop mysqld.service 2>/dev/null || true
-
-# إزالة الحزم إذا موجودة
-dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin* || true
-
-# إزالة أي ملفات قديمة بأمان
-rm -rf /var/www/mitacp /var/www/phpmyadmin
-rm -rf /usr/local/lsws/*
-rm -rf /var/log/mariadb* /var/log/mysql*
-rm -rf /etc/my.cnf /etc/my.cnf.d/*
-
 #-----------------------
 # إعداد المتغيرات
 #-----------------------
