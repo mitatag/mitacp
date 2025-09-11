@@ -1,5 +1,5 @@
 #!/bin/bash
-# MITACP Full Installer - OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin
+# MITACP Full Installer - OpenLiteSpeed + PHP7.4 + MariaDB 10.6 + phpMyAdmin
 # English only, interactive admin & DB passwords
 
 set -euo pipefail
@@ -8,10 +8,11 @@ echo "=== Cleaning previous installations ==="
 
 # Stop services if running
 systemctl stop lsws || true
+systemctl stop mysqld || true
 systemctl stop mariadb || true
 
 # Remove old packages
-dnf remove -y openlitespeed lsphp* mariadb* phpmyadmin || true
+dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
 
 # Remove old directories
 rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html /usr/local/lsws/conf/vhosts/mitacp /usr/local/lsws/conf/vhosts/DEFAULT || true
@@ -19,14 +20,18 @@ rm -rf /var/log/mariadb /var/log/mysql || true
 
 echo "=== Installing dependencies ==="
 dnf update -y
-dnf install -y wget unzip curl epel-release git sudo
+dnf install -y wget unzip curl epel-release git sudo firewalld
 
 # Install LiteSpeed repo
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
 # Install OpenLiteSpeed + PHP7.4
-dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-pdo lsphp74-opcache lsphp74-process
+dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
 systemctl enable --now lsws
+
+# Enable MariaDB module
+dnf module reset -y mariadb
+dnf module enable -y mariadb:10.6
 
 # Install MariaDB
 dnf install -y mariadb-server
