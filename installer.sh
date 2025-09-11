@@ -1,6 +1,7 @@
 #!/bin/bash
-# MITACP Full Installer - OpenLiteSpeed + PHP7.4 + MariaDB 10.11 + phpMyAdmin
-# AlmaLinux 8 only, English, interactive admin & DB passwords
+# MITACP Full Installer for AlmaLinux 8
+# OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin
+# Interactive admin & database passwords, English only
 
 set -euo pipefail
 
@@ -8,10 +9,11 @@ echo "=== Cleaning previous installations ==="
 
 # Stop services if running
 systemctl stop lsws || true
+systemctl stop mysqld || true
 systemctl stop mariadb || true
 
 # Remove old packages
-dnf remove -y openlitespeed lsphp* mariadb* phpmyadmin || true
+dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
 
 # Remove old directories
 rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html /usr/local/lsws/conf/vhosts/mitacp /usr/local/lsws/conf/vhosts/DEFAULT || true
@@ -19,30 +21,20 @@ rm -rf /var/log/mariadb /var/log/mysql || true
 
 echo "=== Installing dependencies ==="
 dnf update -y
-dnf install -y wget unzip curl epel-release git sudo
+dnf install -y wget unzip curl epel-release git sudo firewalld
 
 # Install LiteSpeed repo
-rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
+rpm -Uvh http://rpms.litespeedtech.com/enterprise/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
 # Install OpenLiteSpeed + PHP7.4
 dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
 systemctl enable --now lsws
 
-# Setup MariaDB 10.11 repo for AlmaLinux 8
-cat > /etc/yum.repos.d/MariaDB.repo <<EOL
-[mariadb]
-name = MariaDB 10.11 Community Server
-baseurl = https://archive.mariadb.org/yum/10.11/almalinux8-amd64
-gpgkey = https://archive.mariadb.org/RPM-GPG-KEY-MariaDB
-gpgcheck = 1
-enabled = 1
-EOL
+# Install latest MariaDB repository for AlmaLinux 8
+curl -LsS https://downloads.mariadb.com/MariaDB/mariadb_repo_setup | bash
 
-dnf clean all
-dnf makecache
-
-# Install MariaDB
-dnf install -y MariaDB-server MariaDB-client
+# Install MariaDB server
+dnf install -y mariadb-server
 systemctl enable --now mariadb
 
 # Prompt for passwords
@@ -53,12 +45,7 @@ read -sp "Enter MariaDB root password: " DB_ROOT_PASS
 echo
 
 # Secure MariaDB root
-mysql -uroot <<MYSQL_SCRIPT
-ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';
-DELETE FROM mysql.user WHERE User='';
-DROP DATABASE IF EXISTS test;
-FLUSH PRIVILEGES;
-MYSQL_SCRIPT
+mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
 
 # Create MITACP database
 mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
