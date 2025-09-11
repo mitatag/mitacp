@@ -1,5 +1,5 @@
 #!/bin/bash
-# MITACP Full Installer - AlmaLinux / Rocky / CentOS 8
+# MITACP Full Installer - AlmaLinux 8
 # OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP Dashboard
 
 set -euo pipefail
@@ -15,7 +15,8 @@ dnf update -y
 dnf install -y wget unzip curl epel-release git sudo firewalld
 
 echo "=== Installing OpenLiteSpeed + PHP7.4 ==="
-rpm -Uvh https://rpms.litespeedtech.com/centos/litespeed-repo-2.0-1.el8.noarch.rpm || echo "Repo already installed"
+rpm -Uvh https://rpms.litespeedtech.com/centos/litespeed-repo-2.1-1.el8.noarch.rpm || echo "Repo already installed"
+dnf makecache
 dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
 systemctl enable --now lsws
 
