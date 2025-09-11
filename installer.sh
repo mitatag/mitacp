@@ -1,7 +1,6 @@
 #!/bin/bash
 # MITACP Full Installer - AlmaLinux 8
 # OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin + MITACP Dashboard
-
 set -euo pipefail
 
 echo "=== Cleaning previous installations ==="
@@ -15,9 +14,10 @@ dnf update -y
 dnf install -y wget unzip curl epel-release git sudo firewalld
 
 echo "=== Installing OpenLiteSpeed + PHP7.4 ==="
-rpm -Uvh https://rpms.litespeedtech.com/centos/litespeed-repo-2.1-1.el8.noarch.rpm || echo "Repo already installed"
+# استخدم مستودع LiteSpeed الرسمي الحديث
+wget -O - https://repo.litespeed.sh | bash
 dnf makecache
-dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
+dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
 systemctl enable --now lsws
 
 echo "=== Installing MariaDB ==="
@@ -45,7 +45,7 @@ cd "$MITACP_DIR"
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/index.php
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/domin.php
 
-# Create db.php
+# Create db.php automatically
 cat > db.php <<EOL
 <?php
 define("DB_HOST", "localhost");
