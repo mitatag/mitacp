@@ -30,7 +30,7 @@ dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring
 
 systemctl enable --now lsws
 
-# Enable MySQL 8 repo
+# Enable MySQL 8 repo only
 wget https://repo.mysql.com/mysql80-community-release-el8-3.noarch.rpm
 dnf localinstall -y mysql80-community-release-el8-3.noarch.rpm
 dnf config-manager --disable mysql57-community
