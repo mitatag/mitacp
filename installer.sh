@@ -1,5 +1,6 @@
 #!/bin/bash
-# MITACP Full Installer - Clean Install OpenLiteSpeed + PHP7.4 + MySQL8 + phpMyAdmin
+# MITACP Full Installer - OpenLiteSpeed + PHP7.4 + MySQL8 + phpMyAdmin
+# English only, interactive admin & MySQL passwords
 
 set -euo pipefail
 
@@ -13,32 +14,32 @@ systemctl stop mariadb || true
 # Remove old packages
 dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
 
-# Remove old directories and logs
-rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html /usr/local/lsws/conf/vhosts/mitacp /usr/local/lsws/conf/vhosts/DEFAULT
-rm -rf /var/log/mariadb /var/log/mysql
-rm -rf /var/lib/mysql
-
-# Clean MySQL data directory completely
-rm -rf /var/lib/mysql/* || true
+# Remove old directories
+rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html /usr/local/lsws/conf/vhosts/mitacp /usr/local/lsws/conf/vhosts/DEFAULT || true
+rm -rf /var/log/mariadb /var/log/mysql || true
 
 echo "=== Installing dependencies ==="
 dnf update -y
-dnf install -y wget unzip curl epel-release git sudo firewalld
+dnf install -y wget unzip curl epel-release git sudo
 
 # Install LiteSpeed repo
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
 # Install OpenLiteSpeed + PHP7.4
 dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
+
 systemctl enable --now lsws
 
-# Enable MySQL 8 repo only
+echo "=== Configuring MySQL 8 repo and modules ==="
+# Enable MySQL 8 repo and fix module conflicts
 wget https://repo.mysql.com/mysql80-community-release-el8-3.noarch.rpm
 dnf localinstall -y mysql80-community-release-el8-3.noarch.rpm
-dnf config-manager --enable mysql80-community
+dnf module reset mysql -y
+dnf module enable mysql:8.0 -y
+dnf clean all
 dnf makecache
 
-# Install MySQL 8
+echo "=== Installing MySQL 8 ==="
 dnf install -y mysql-community-server
 systemctl enable --now mysqld
 
@@ -54,8 +55,7 @@ TEMP_PASS=$(grep 'temporary password' /var/log/mysqld.log | awk '{print $NF}')
 mysql --connect-expired-password -uroot -p"$TEMP_PASS" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
 
 # Create MITACP database
-mysql -uroot -p"$DB_ROOT_PASS" -e "DROP DATABASE IF EXISTS mitacp;"
-mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE mitacp;"
+mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
 
 # Download phpMyAdmin
 cd /var/www/
