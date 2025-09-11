@@ -1,6 +1,6 @@
 #!/bin/bash
-# MITACP Full Installer - OpenLiteSpeed + PHP7.4 + MySQL8 + phpMyAdmin
-# English only, interactive admin & MySQL passwords
+# MITACP Full Installer - OpenLiteSpeed + PHP7.4 + MariaDB + phpMyAdmin
+# English only, interactive admin & DB passwords
 
 set -euo pipefail
 
@@ -8,11 +8,10 @@ echo "=== Cleaning previous installations ==="
 
 # Stop services if running
 systemctl stop lsws || true
-systemctl stop mysqld || true
 systemctl stop mariadb || true
 
 # Remove old packages
-dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
+dnf remove -y openlitespeed lsphp* mariadb* phpmyadmin || true
 
 # Remove old directories
 rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html /usr/local/lsws/conf/vhosts/mitacp /usr/local/lsws/conf/vhosts/DEFAULT || true
@@ -26,33 +25,22 @@ dnf install -y wget unzip curl epel-release git sudo
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
 # Install OpenLiteSpeed + PHP7.4
-dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
-
+dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-pdo lsphp74-opcache lsphp74-process
 systemctl enable --now lsws
 
-echo "=== Configuring MySQL 8 repo and modules ==="
-# Enable MySQL 8 repo and fix module conflicts
-wget https://repo.mysql.com/mysql80-community-release-el8-3.noarch.rpm
-dnf localinstall -y mysql80-community-release-el8-3.noarch.rpm
-dnf module reset mysql -y
-dnf module enable mysql:8.0 -y
-dnf clean all
-dnf makecache
-
-echo "=== Installing MySQL 8 ==="
-dnf install -y mysql-community-server
-systemctl enable --now mysqld
+# Install MariaDB
+dnf install -y mariadb-server
+systemctl enable --now mariadb
 
 # Prompt for passwords
 read -p "Enter MITACP admin username: " ADMIN_USER
 read -sp "Enter MITACP admin password: " ADMIN_PASS
 echo
-read -sp "Enter MySQL root password: " DB_ROOT_PASS
+read -sp "Enter MariaDB root password: " DB_ROOT_PASS
 echo
 
-# Secure MySQL root
-TEMP_PASS=$(grep 'temporary password' /var/log/mysqld.log | awk '{print $NF}')
-mysql --connect-expired-password -uroot -p"$TEMP_PASS" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
+# Secure MariaDB root
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
 
 # Create MITACP database
 mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
@@ -157,5 +145,5 @@ echo "=== Installation Completed ==="
 echo "MITACP Panel: http://$IP:8088"
 echo "File Manager: http://$IP:8088/files/tinyfilemanager.php"
 echo "phpMyAdmin: http://$IP/phpmyadmin"
-echo "MySQL root password: $DB_ROOT_PASS"
+echo "MariaDB root password: $DB_ROOT_PASS"
 echo "Admin MITACP: $ADMIN_USER / Password: $ADMIN_PASS"
