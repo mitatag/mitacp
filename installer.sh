@@ -9,8 +9,8 @@ echo "=== Cleaning previous installations ==="
 
 # Stop services if running
 systemctl stop lsws || true
-systemctl stop mysqld || true
 systemctl stop mariadb || true
+systemctl stop mysqld || true
 
 # Remove old packages
 dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
@@ -23,7 +23,7 @@ echo "=== Installing dependencies ==="
 dnf update -y
 dnf install -y wget unzip curl epel-release git sudo firewalld
 
-# Install LiteSpeed repo
+# Install LiteSpeed repo (AlmaLinux compatible)
 rpm -Uvh http://rpms.litespeedtech.com/enterprise/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
 
 # Install OpenLiteSpeed + PHP7.4
@@ -45,13 +45,16 @@ read -sp "Enter MariaDB root password: " DB_ROOT_PASS
 echo
 
 # Secure MariaDB root
-mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
+mariadb -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
 
 # Create MITACP database
-mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
+mariadb -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
+
+# Prepare /var/www
+mkdir -p /var/www
+cd /var/www
 
 # Download phpMyAdmin
-cd /var/www/
 wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip
 unzip phpMyAdmin-latest-all-languages.zip
 mv phpMyAdmin-*-all-languages phpmyadmin
@@ -76,7 +79,6 @@ cat > /var/www/phpmyadmin/config.inc.php <<EOL
 EOL
 
 # Download MITACP
-cd /var/www/
 wget https://raw.githubusercontent.com/mitatag/mitacp/main/panel.zip
 unzip panel.zip -d mitacp
 rm -f panel.zip
