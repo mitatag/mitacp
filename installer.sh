@@ -1,6 +1,5 @@
 #!/bin/bash
-# MITACP Full Installer - OpenLiteSpeed + PHP7.4 + MySQL8 + phpMyAdmin
-# English only, interactive admin & MySQL passwords
+# MITACP Full Installer - Clean Install OpenLiteSpeed + PHP7.4 + MySQL8 + phpMyAdmin
 
 set -euo pipefail
 
@@ -14,13 +13,17 @@ systemctl stop mariadb || true
 # Remove old packages
 dnf remove -y openlitespeed lsphp* mariadb* mysql* phpmyadmin || true
 
-# Remove old directories
-rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html /usr/local/lsws/conf/vhosts/mitacp /usr/local/lsws/conf/vhosts/DEFAULT || true
-rm -rf /var/log/mariadb /var/log/mysql || true
+# Remove old directories and logs
+rm -rf /var/www/mitacp /var/www/phpmyadmin /usr/local/lsws/DEFAULT/html /usr/local/lsws/conf/vhosts/mitacp /usr/local/lsws/conf/vhosts/DEFAULT
+rm -rf /var/log/mariadb /var/log/mysql
+rm -rf /var/lib/mysql
+
+# Clean MySQL data directory completely
+rm -rf /var/lib/mysql/* || true
 
 echo "=== Installing dependencies ==="
 dnf update -y
-dnf install -y wget unzip curl epel-release git sudo
+dnf install -y wget unzip curl epel-release git sudo firewalld
 
 # Install LiteSpeed repo
 rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rpm || echo "Repo already installed"
@@ -51,7 +54,8 @@ TEMP_PASS=$(grep 'temporary password' /var/log/mysqld.log | awk '{print $NF}')
 mysql --connect-expired-password -uroot -p"$TEMP_PASS" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS'; FLUSH PRIVILEGES;"
 
 # Create MITACP database
-mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS mitacp;"
+mysql -uroot -p"$DB_ROOT_PASS" -e "DROP DATABASE IF EXISTS mitacp;"
+mysql -uroot -p"$DB_ROOT_PASS" -e "CREATE DATABASE mitacp;"
 
 # Download phpMyAdmin
 cd /var/www/
