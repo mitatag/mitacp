@@ -27,13 +27,11 @@ rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el8.noarch.rp
 
 # Install OpenLiteSpeed + PHP7.4
 dnf install -y openlitespeed lsphp74 lsphp74-common lsphp74-xml lsphp74-mbstring lsphp74-mysqlnd lsphp74-pdo lsphp74-opcache lsphp74-process
-
 systemctl enable --now lsws
 
 # Enable MySQL 8 repo only
 wget https://repo.mysql.com/mysql80-community-release-el8-3.noarch.rpm
 dnf localinstall -y mysql80-community-release-el8-3.noarch.rpm
-dnf config-manager --disable mysql57-community
 dnf config-manager --enable mysql80-community
 dnf makecache
 
